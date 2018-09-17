@@ -1,4 +1,7 @@
 import java.util.Random;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /*
  * Name: Joshua Pollmann
@@ -13,22 +16,44 @@ public class Main {
 	private static class Account
 	{
 		private int balance = 0;
+		private boolean overdraft = false;
+		private Lock accessLock = new ReentrantLock();
+		private Condition canWithdraw =  accessLock.newCondition();
 		
 		public Account()
 		{
 			
 		}
 		
-		public void addFunds(int amount)
+		public void addFunds(String name, int amount)
 		{
+			accessLock.lock();
 			balance += amount;
+			System.out.println("Thread " + name + " deposits $" + amount + "\t\t\t\t\t\tBalance is $" + balance);
+			canWithdraw.signal();
+			accessLock.unlock();
 		}
 		
-		public boolean withdraw(int amount)
+		public void withdraw(String name, int amount) throws InterruptedException
 		{
-			if(balance - amount < 0) return false;
-			balance -= amount;
-			return true;
+			accessLock.lock();
+			try
+			{
+				while(balance - amount < 0)
+				{
+					if(!overdraft) System.out.println("\t       \t\t\tThread " + name + " withdraws $" + amount + " Withdrawal - Blocked - Insufficient Funds");
+					overdraft = true;
+					canWithdraw.await();
+				}
+				
+				overdraft = false;
+				balance -= amount;
+				System.out.println("\t       \t\t\tThread " + name + " withdraws $" + amount + "\t\tBalance is $" + balance);
+				
+			}finally
+			{
+				accessLock.unlock();
+			}
 		}
 		
 		public int getBalance()
@@ -55,11 +80,11 @@ public class Main {
 			while(true)
 			{
 				int thisDeposit = r.nextInt(199) + 1;
-				System.out.println("Thread " + this.name + " deposits $" + thisDeposit + "\t\t\tBalance is $" + acc.getBalance());
-				acc.addFunds(thisDeposit);
+				
+				acc.addFunds(name, thisDeposit);
 				
 				try {
-					sleep(3);
+					sleep(1);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -86,13 +111,13 @@ public class Main {
 			while(true)
 			{
 				int thisWithdraw = r.nextInt(49) + 1;
-				boolean hold = false;
-				while(!acc.withdraw(thisWithdraw))
-				{
-					if(!hold) System.out.println("Thread " + this.name + " withdraws $" + thisWithdraw + "Withdrawal - Blocked - Insufficient Funds");
-					hold = true;
+
+				try {
+					acc.withdraw(name, thisWithdraw);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
 				}
-				System.out.println("\tThread " + this.name + " withdraws $" + thisWithdraw + "\tBalance is $" + acc.getBalance());
 			}
 		}
 	}
@@ -100,8 +125,8 @@ public class Main {
 	public static void main(String[] args)
 	{
 		Account mainAccount = new Account();
-		System.out.println("Deposit Threads\tWithdrawal Threads\t Balance");
-		System.out.println("----------\t----------\t----------");
+		System.out.println("Deposit Threads\t\t\tWithdrawal Threads\t\t\tBalance");
+		System.out.println("---------------\t\t\t---------------\t\t\t---------------");
 		
 		for(int i = 1; i < 5; i++)
 		{
